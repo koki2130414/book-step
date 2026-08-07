@@ -5,6 +5,11 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { readingPostSchema, commentSchema, type ReadingPostInput } from "@/lib/validations/book";
 
+// books.title / books.author は NOT NULL 制約のため、未入力の場合は仮の値を補う
+// (タイトル未入力でも登録できるようにするためのMVPの割り切り。後から編集で埋められる)
+const UNTITLED_PLACEHOLDER = "タイトル未設定";
+const UNKNOWN_AUTHOR_PLACEHOLDER = "著者不明";
+
 // 書籍情報を検索し、既存(ISBN一致)があれば再利用、なければ新規作成する
 async function findOrCreateBook(input: ReadingPostInput, userId: string) {
   const supabase = createClient();
@@ -25,8 +30,8 @@ async function findOrCreateBook(input: ReadingPostInput, userId: string) {
   const { data: created, error } = await supabase
     .from("books")
     .insert({
-      title: input.title,
-      author: input.author,
+      title: input.title?.trim() || UNTITLED_PLACEHOLDER,
+      author: input.author?.trim() || UNKNOWN_AUTHOR_PLACEHOLDER,
       isbn13,
       isbn10,
       cover_image_url: input.coverImageUrl || null,

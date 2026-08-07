@@ -144,15 +144,16 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
 
       <section className="space-y-4">
         <h2 className="font-display font-semibold text-ink">書籍情報</h2>
+        <p className="text-xs text-ink/50">すべて任意項目です。あとで編集して埋めることもできます。</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="title">本のタイトル *</Label>
-            <Input id="title" {...register("title")} disabled={isEdit} />
+            <Label htmlFor="title">本のタイトル</Label>
+            <Input id="title" {...register("title")} disabled={isEdit} placeholder="未入力でも登録できます" />
             {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="author">著者名 *</Label>
-            <Input id="author" {...register("author")} disabled={isEdit} />
+            <Label htmlFor="author">著者名</Label>
+            <Input id="author" {...register("author")} disabled={isEdit} placeholder="未入力でも登録できます" />
             {errors.author && <p className="text-xs text-destructive">{errors.author.message}</p>}
           </div>
           <div className="space-y-1.5">
@@ -195,7 +196,7 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
         <h2 className="font-display font-semibold text-ink">読書記録</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="readingStatus">読書ステータス *</Label>
+            <Label htmlFor="readingStatus">読書ステータス</Label>
             <Controller
               control={control}
               name="readingStatus"
@@ -214,7 +215,7 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="visibility">公開範囲 *</Label>
+            <Label htmlFor="visibility">公開範囲</Label>
             <Controller
               control={control}
               name="visibility"

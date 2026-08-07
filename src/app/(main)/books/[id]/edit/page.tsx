@@ -49,7 +49,7 @@ export default async function EditBookPage({ params }: { params: { id: string } 
         genres={genres}
         defaultValues={defaultValues as any}
         isEdit
-        onSubmitAction={updateReadingPost.bind(null, post.id)}
+        onSubmitAction={(values) => updateReadingPost(post.id, values)}
       />
     </div>
   );
