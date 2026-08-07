@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 99%;
+    --foreground: 20 10% 15%;
+    --card: 40 33% 99%;
+    --card-foreground: 20 10% 15%;
+    --border: 35 25% 88%;
+    --input: 35 25% 88%;
+    --ring: 140 25% 30%;
+
+    /* BOOK STEP カラートークン(ライトモード。rgb三つ組で定義しopacity修飾子に対応) */
+    --color-paper: 254 253 251;
+    --color-ink: 43 39 36;
+    --color-beige-50: 251 247 241;
+    --color-beige-100: 245 237 225;
+    --color-beige-200: 234 223 203;
+    --color-beige-300: 219 201 168;
+    --color-forest-50: 238 243 238;
+    --color-forest-100: 215 228 216;
+  }
+
+  .dark {
+    --background: 150 10% 9%;
+    --foreground: 40 20% 92%;
+    --card: 150 8% 12%;
+    --card-foreground: 40 20% 92%;
+    --border: 150 8% 22%;
+    --input: 150 8% 22%;
+    --ring: 140 25% 55%;
+
+    /* BOOK STEP カラートークン(ダークモード) */
+    --color-paper: 24 23 21;
+    --color-ink: 232 224 212;
+    --color-beige-50: 34 31 28;
+    --color-beige-100: 44 40 35;
+    --color-beige-200: 60 54 47;
+    --color-beige-300: 84 74 63;
+    --color-forest-50: 24 33 27;
+    --color-forest-100: 34 47 38;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-paper text-ink;
+  }
+
+  /* キーボード操作時のフォーカスを明示(アクセシビリティ) */
+  :focus-visible {
+    outline: 2px solid theme("colors.forest.500");
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
