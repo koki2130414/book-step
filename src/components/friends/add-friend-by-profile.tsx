@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, Clock, UserPlus } from "lucide-react";
+import { Check, Clock, UserPlus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast-provider";
 import { sendFriendRequest } from "@/app/(main)/friends/actions";
@@ -61,7 +61,9 @@ export function AddFriendByProfile({ targetId, targetUsername, isSelf, initialSt
         })
       }
     >
-      <UserPlus size={16} /> 友達申請を送る
+      <UserPlus size={16} className={isPending ? "hidden" : undefined} />
+      {isPending && <Loader2 className="animate-spin" size={16} />}
+      友達申請を送る
     </Button>
   );
 }

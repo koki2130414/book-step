@@ -1,6 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
-import { Search, UserPlus, Check, Clock } from "lucide-react";
+import { Search, UserPlus, Check, Clock, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -18,6 +18,8 @@ export function FriendSearch() {
   const [results, setResults] = useState<UserResult[] | null>(null);
   const [isPending, startTransition] = useTransition();
   const [sentTo, setSentTo] = useState<Set<string>>(new Set());
+  // 申請ボタンを押してからサーバーの応答が返るまでの間、ボタンを無効化しローディング表示を出すための状態
+  const [submittingIds, setSubmittingIds] = useState<Set<string>>(new Set());
 
   const runSearch = () => {
     if (!query.trim()) return;
@@ -29,12 +31,20 @@ export function FriendSearch() {
   };
 
   const handleRequest = async (userId: string) => {
+    if (submittingIds.has(userId)) return; // 二重送信を防止
+    setSubmittingIds((prev) => new Set(prev).add(userId));
     try {
       await sendFriendRequest(userId);
       setSentTo((prev) => new Set(prev).add(userId));
       showToast("友達申請を送りました");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "申請に失敗しました", "error");
+    } finally {
+      setSubmittingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
     }
   };
 
@@ -48,7 +58,9 @@ export function FriendSearch() {
           placeholder="ユーザー名または表示名で検索"
           aria-label="ユーザー検索"
         />
-        <Button onClick={runSearch} disabled={isPending}><Search size={16} /></Button>
+        <Button onClick={runSearch} disabled={isPending}>
+          {isPending ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
+        </Button>
       </div>
 
       {results && (
@@ -56,6 +68,7 @@ export function FriendSearch() {
           {results.map((u) => {
             const alreadySent = sentTo.has(u.id) || u.friendshipStatus === "pending";
             const isFriend = u.friendshipStatus === "accepted";
+            const isSubmitting = submittingIds.has(u.id);
             return (
               <li key={u.id} className="flex items-center justify-between rounded-md border border-beige-200 p-3">
                 <div className="flex items-center gap-3">
@@ -73,8 +86,9 @@ export function FriendSearch() {
                 ) : alreadySent ? (
                   <span className="flex items-center gap-1 text-xs text-ink/40"><Clock size={14} /> 申請中</span>
                 ) : (
-                  <Button size="sm" variant="secondary" onClick={() => handleRequest(u.id)}>
-                    <UserPlus size={14} /> 申請する
+                  <Button size="sm" variant="secondary" disabled={isSubmitting} onClick={() => handleRequest(u.id)}>
+                    {isSubmitting ? <Loader2 className="animate-spin" size={14} /> : <UserPlus size={14} />}
+                    申請する
                   </Button>
                 )}
               </li>
