@@ -15,6 +15,11 @@ export default async function EditBookPage({ params }: { params: { id: string } 
 
   const genres = await getActiveGenres();
 
+  // Server ComponentからClient Componentへは、素のアロー関数(クロージャ)を渡せない
+  // (Next.jsが「Server Actionとして呼び出し可能な関数」と認識できずエラーになるため)。
+  // bind()で追加引数(post.id)を束縛したServer Action参照として渡す必要がある
+  const updateReadingPostWithId = updateReadingPost.bind(null, post.id);
+
   const defaultValues = {
     title: post.book?.title ?? "",
     author: post.book?.author ?? "",
@@ -49,7 +54,7 @@ export default async function EditBookPage({ params }: { params: { id: string } 
         genres={genres}
         defaultValues={defaultValues as any}
         isEdit
-        onSubmitAction={(values) => updateReadingPost(post.id, values)}
+        onSubmitAction={updateReadingPostWithId}
       />
     </div>
   );

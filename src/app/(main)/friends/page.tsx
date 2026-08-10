@@ -32,14 +32,16 @@ export default async function FriendsPage() {
     <div className="space-y-6">
       <h1 className="font-display text-xl font-bold text-ink">友達</h1>
       <Tabs defaultValue="members">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="members">メンバー一覧</TabsTrigger>
-          <TabsTrigger value="list">友達一覧({friends.length})</TabsTrigger>
-          <TabsTrigger value="requests">申請一覧({requests.length})</TabsTrigger>
-          <TabsTrigger value="search">ユーザー検索</TabsTrigger>
-          <TabsTrigger value="add-id">IDで追加</TabsTrigger>
-          <TabsTrigger value="qr">QRコード</TabsTrigger>
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <TabsList className="w-max sm:w-auto sm:flex-wrap">
+            <TabsTrigger value="members">メンバー一覧</TabsTrigger>
+            <TabsTrigger value="list">友達一覧({friends.length})</TabsTrigger>
+            <TabsTrigger value="requests">申請一覧({requests.length})</TabsTrigger>
+            <TabsTrigger value="search">ユーザー検索</TabsTrigger>
+            <TabsTrigger value="add-id">IDで追加</TabsTrigger>
+            <TabsTrigger value="qr">QRコード</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="members">
           <MemberList initialMembers={initialMembers} initialHasMore={membersResult.hasMore} />
         </TabsContent>
