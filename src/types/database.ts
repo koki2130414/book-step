@@ -132,3 +132,29 @@ export interface ReadingGoal {
   target_year: number;
   target_month: number | null;
 }
+
+// ---- 個人目標(personal goals) ----
+export type GoalStatus = "in_progress" | "achieved" | "archived";
+
+export interface PersonalGoal {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  deadline: string | null;
+  progress: number;
+  status: GoalStatus;
+  visibility: VisibilityLevel;
+  created_at: string;
+  updated_at: string;
+  owner?: Profile;
+}
+
+export interface GoalMessage {
+  id: string;
+  goal_id: string;
+  sender_id: string;
+  message: string;
+  created_at: string;
+  sender?: Profile;
+}
