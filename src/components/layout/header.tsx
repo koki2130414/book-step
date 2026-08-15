@@ -15,6 +15,7 @@ export function Header({ unreadCount = 0 }: { unreadCount?: number }) {
           <Link href="/search" className="text-sm text-ink/70 hover:text-ink">検索</Link>
           <Link href="/shelf" className="text-sm text-ink/70 hover:text-ink">本棚</Link>
           <Link href="/friends" className="text-sm text-ink/70 hover:text-ink">友達</Link>
+          <Link href="/goals" className="text-sm text-ink/70 hover:text-ink">目標</Link>
         </nav>
         <div className="flex items-center gap-3">
           <Link href="/notifications" aria-label="通知" className="relative rounded-full p-2 hover:bg-beige-50">
