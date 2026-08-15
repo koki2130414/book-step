@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { PersonalGoal, GoalMessage } from "@/types/database";
+import type { PersonalGoal, GoalMessage, Profile } from "@/types/database";
 
 // 自分の目標一覧
 export async function getMyGoals(userId: string): Promise<PersonalGoal[]> {
@@ -25,20 +25,26 @@ export async function getUserGoals(userId: string): Promise<PersonalGoal[]> {
 
 export async function getGoalById(goalId: string): Promise<PersonalGoal | null> {
   const supabase = createClient();
-  const { data } = await supabase
-    .from("personal_goals")
-    .select("*, owner:profiles!personal_goals_user_id_fkey(*)")
-    .eq("id", goalId)
-    .maybeSingle();
-  return (data as unknown as PersonalGoal) ?? null;
+  const { data } = await supabase.from("personal_goals").select("*").eq("id", goalId).maybeSingle();
+  if (!data) return null;
+  const goal = data as PersonalGoal;
+
+  const { data: owner } = await supabase.from("profiles").select("*").eq("id", goal.user_id).maybeSingle();
+  return { ...goal, owner: (owner as Profile) ?? undefined };
 }
 
 export async function getGoalMessages(goalId: string): Promise<GoalMessage[]> {
   const supabase = createClient();
   const { data } = await supabase
     .from("goal_messages")
-    .select("*, sender:profiles!goal_messages_sender_id_fkey(*)")
+    .select("*")
     .eq("goal_id", goalId)
     .order("created_at", { ascending: true });
-  return (data ?? []) as unknown as GoalMessage[];
+  const messages = (data ?? []) as GoalMessage[];
+  if (messages.length === 0) return [];
+
+  const senderIds = Array.from(new Set(messages.map((m) => m.sender_id)));
+  const { data: profiles } = await supabase.from("profiles").select("*").in("id", senderIds);
+  const byId = new Map((profiles ?? []).map((p: any) => [p.id as string, p as Profile]));
+  return messages.map((m) => ({ ...m, sender: byId.get(m.sender_id) }));
 }
