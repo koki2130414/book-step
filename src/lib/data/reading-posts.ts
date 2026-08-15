@@ -32,17 +32,22 @@ async function attachEngagement(
 // ホーム画面: 友達の投稿+自分の投稿を新着順に取得(RLSが可視範囲を保証する)
 export async function getHomeFeed(userId: string): Promise<ReadingPost[]> {
   const supabase = createClient();
+  const { data: hidden } = await supabase.from("hidden_users").select("hidden_user_id").eq("user_id", userId);
+  const hiddenIds = new Set((hidden ?? []).map((h: any) => h.hidden_user_id as string));
+
   const { data, error } = await supabase
     .from("reading_posts")
     .select(POST_SELECT)
     .order("created_at", { ascending: false })
-    .limit(30);
+    .limit(50);
 
   if (error) {
     console.error("getHomeFeed error:", error.message);
     return [];
   }
-  return attachEngagement((data ?? []) as unknown as ReadingPost[], userId);
+  // 非表示にしたユーザーの投稿を除外
+  const posts = ((data ?? []) as unknown as ReadingPost[]).filter((p) => !hiddenIds.has(p.user_id));
+  return attachEngagement(posts, userId);
 }
 
 export async function getMyShelf(userId: string): Promise<ReadingPost[]> {
