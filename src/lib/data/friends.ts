@@ -1,20 +1,41 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Friendship, Profile } from "@/types/database";
 
-// 承認済みの友達一覧(自分視点で相手のprofileを返す)
+// 友達一覧(全登録ユーザーのうち、自分と「自分が非表示にした人」を除く)
 export async function getFriendsList(userId: string): Promise<Profile[]> {
   const supabase = createClient();
+  const { data: hidden } = await supabase.from("hidden_users").select("hidden_user_id").eq("user_id", userId);
+  const hiddenSet = new Set((hidden ?? []).map((h: any) => h.hidden_user_id as string));
   const { data } = await supabase
-    .from("friendships")
-    .select("requester:profiles!friendships_requester_id_fkey(*), addressee:profiles!friendships_addressee_id_fkey(*), requester_id, addressee_id")
-    .eq("status", "accepted")
-    .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
-
-  if (!data) return [];
-  return data.map((row: any) => (row.requester_id === userId ? row.addressee : row.requester));
+    .from("profiles")
+    .select("*")
+    .neq("id", userId)
+    .order("display_name", { ascending: true });
+  return ((data ?? []) as Profile[]).filter((p) => !hiddenSet.has(p.id));
 }
 
-// 自分宛の承認待ち申請
+// 自分が非表示にしているユーザー一覧
+export async function getHiddenProfiles(userId: string): Promise<Profile[]> {
+  const supabase = createClient();
+  const { data: hidden } = await supabase.from("hidden_users").select("hidden_user_id").eq("user_id", userId);
+  const ids = (hidden ?? []).map((h: any) => h.hidden_user_id as string);
+  if (ids.length === 0) return [];
+  const { data } = await supabase
+    .from("profiles")
+    .select("*")
+    .in("id", ids)
+    .order("display_name", { ascending: true });
+  return (data ?? []) as Profile[];
+}
+
+// 自分が非表示にしたユーザーのIDリスト
+export async function getHiddenIds(userId: string): Promise<string[]> {
+  const supabase = createClient();
+  const { data } = await supabase.from("hidden_users").select("hidden_user_id").eq("user_id", userId);
+  return (data ?? []).map((h: any) => h.hidden_user_id as string);
+}
+
+// 自分宛の承認待ち申請(後方互換のため残置。現在の友達モデルでは未使用)
 export async function getPendingRequests(userId: string): Promise<Friendship[]> {
   const supabase = createClient();
   const { data } = await supabase
@@ -56,7 +77,7 @@ export async function getProfileByUsernameExact(username: string): Promise<Profi
   return data as Profile | null;
 }
 
-// 登録メンバー一覧(ページネーション付き)。新しく登録した順に表示する
+// 登録メンバーダー一覧(ページネーション付き)。新しく登録した順に表示する
 export async function getAllMembers(
   excludeUserId: string,
   limit: number,
