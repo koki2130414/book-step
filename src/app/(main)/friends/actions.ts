@@ -64,3 +64,37 @@ export async function removeFriendship(friendshipId: string) {
   if (error) throw new Error(`解除に失敗しました: ${error.message}`);
   revalidatePath("/friends");
 }
+
+// ユーザーを非表示にする(自分のフィード/友達一覧から見えなくする。方向性あり)
+export async function hideUser(hiddenUserId: string) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインが必要です");
+
+  const { error } = await supabase
+    .from("hidden_users")
+    .upsert({ user_id: user.id, hidden_user_id: hiddenUserId }, { onConflict: "user_id,hidden_user_id" });
+  if (error) throw new Error(`非表示に失敗しました: ${error.message}`);
+  revalidatePath("/friends");
+  revalidatePath("/home");
+}
+
+// 非表示を解除する
+export async function unhideUser(hiddenUserId: string) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインが必要です");
+
+  const { error } = await supabase
+    .from("hidden_users")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("hidden_user_id", hiddenUserId);
+  if (error) throw new Error(`再表示に失敗しました: ${error.message}`);
+  revalidatePath("/friends");
+  revalidatePath("/home");
+}
