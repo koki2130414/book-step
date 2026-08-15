@@ -5,6 +5,7 @@ import { BookCard } from "@/components/books/book-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getCurrentProfile } from "@/lib/data/profile";
 import { getHomeFeed, getMyShelf, getRecommendedBooks } from "@/lib/data/reading-posts";
+import { getMyGoals } from "@/lib/data/goals";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
@@ -17,6 +18,7 @@ export default async function HomePage() {
     getRecommendedBooks(profile.id),
   ]);
   const currentlyReading = myShelf.filter((p) => p.reading_status === "reading");
+  const goals = await getMyGoals(profile.id);
 
   const supabase = createClient();
   const { data: goal } = await supabase
@@ -51,8 +53,13 @@ export default async function HomePage() {
 
       {/* 読書目標の進捗 */}
       <section className="rounded-lg border border-beige-200 bg-beige-50/60 p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-forest-700">
-          <Target size={16} /> 今月の読書目標
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium text-forest-700">
+            <Target size={16} /> 今月の読書目標
+          </div>
+          <Link href="/goals" className="text-xs text-forest-700 hover:underline">
+            {goal ? "編集する" : "設定する"}
+          </Link>
         </div>
         {goal ? (
           <div>
@@ -71,6 +78,31 @@ export default async function HomePage() {
           </p>
         )}
       </section>
+
+      {/* 個人目標 */}
+      {goals.length > 0 && (
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-lg font-semibold text-ink">目標</h2>
+            <Link href="/goals" className="text-xs text-forest-700 hover:underline">すべて見る</Link>
+          </div>
+          <ul className="space-y-3">
+            {goals.slice(0, 3).map((g) => (
+              <li key={g.id} className="space-y-2 rounded-lg border border-beige-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <Link href={`/goals/${g.id}`} className="font-display font-semibold text-ink hover:underline">
+                    {g.title}
+                  </Link>
+                  <span className="shrink-0 text-xs text-ink/50">{g.progress}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-beige-200">
+                  <div className="h-full rounded-full bg-forest-600" style={{ width: `${g.progress}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 現在読んでいる本 */}
       {currentlyReading.length > 0 && (
