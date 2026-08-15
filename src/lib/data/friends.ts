@@ -77,7 +77,7 @@ export async function getProfileByUsernameExact(username: string): Promise<Profi
   return data as Profile | null;
 }
 
-// 登録メンバーダー一覧(ページネーション付き)。新しく登録した順に表示する
+// 登録メンバー一覧(ページネーション付き)。新しく登録した順に表示する
 export async function getAllMembers(
   excludeUserId: string,
   limit: number,
