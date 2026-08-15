@@ -42,16 +42,13 @@ export async function getProfileStats(userId: string) {
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("reading_status", "reading"),
-    supabase
-      .from("friendships")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "accepted")
-      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
+    // 登録者は全員友達なので、友達数は「自分以外の登録ユーザー数」
+    supabase.from("profiles").select("id", { count: "exact", head: true }),
   ]);
 
   return {
     finishedCount: finishedCount ?? 0,
     readingCount: readingCount ?? 0,
-    friendCount: friendCount ?? 0,
+    friendCount: Math.max(0, (friendCount ?? 1) - 1),
   };
 }
