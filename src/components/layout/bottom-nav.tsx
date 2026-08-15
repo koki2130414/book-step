@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Search, PlusCircle, Library, Users, User } from "lucide-react";
+import { Home, Search, PlusCircle, Library, Users, Target, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/books/new", label: "本を追加", icon: PlusCircle, isCentral: true },
   { href: "/shelf", label: "本棚", icon: Library },
   { href: "/friends", label: "友達", icon: Users },
+  { href: "/goals", label: "目標", icon: Target },
   { href: "/profile", label: "マイページ", icon: User },
 ];
 
@@ -22,7 +23,7 @@ export function BottomNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t border-beige-200 bg-paper/95 backdrop-blur md:hidden"
       aria-label="メインナビゲーション"
     >
-      <ul className="flex items-end justify-between px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+      <ul className="flex items-end justify-between px-0.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
         {NAV_ITEMS.map(({ href, label, icon: Icon, isCentral }) => {
           const active = pathname === href;
           if (isCentral) {
@@ -44,7 +45,7 @@ export function BottomNav() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center gap-0.5 px-1 py-1 text-[11px]",
+                  "flex flex-col items-center gap-0.5 px-0.5 py-1 text-[10px]",
                   active ? "text-forest-700" : "text-ink/50",
                 )}
               >
