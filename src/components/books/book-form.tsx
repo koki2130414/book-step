@@ -1,9 +1,10 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Upload, ImageIcon } from "lucide-react";
 import { readingPostSchema, type ReadingPostInput } from "@/lib/validations/book";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +41,8 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ExternalResult[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
     register,
@@ -58,6 +61,50 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
   });
 
   const rating = watch("rating") ?? 0;
+  const coverImageUrl = watch("coverImageUrl");
+
+  // 端末内の画像をSupabase Storageにアップロードし、表紙画像URLとしてセットする。
+  // 外部検索で表紙が見つからない本に、自分で表紙を追加できるようにする。
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 同じファイルを選び直せるようリセット
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("画像ファイルを選択してください", "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("画像サイズは5MBまでにしてください", "error");
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        showToast("ログインが必要です", "error");
+        return;
+      }
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage
+        .from("book-covers")
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (error) {
+        showToast(`アップロードに失敗しました: ${error.message}`, "error");
+        return;
+      }
+      const { data } = supabase.storage.from("book-covers").getPublicUrl(path);
+      setValue("coverImageUrl", data.publicUrl, { shouldValidate: true });
+      showToast("表紙画像をアップロードしました");
+    } catch {
+      showToast("アップロードに失敗しました", "error");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleExternalSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -145,6 +192,60 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
       <section className="space-y-4">
         <h2 className="font-display font-semibold text-ink">書籍情報</h2>
         <p className="text-xs text-ink/50">すべて任意項目です。あとで編集して埋めることもできます。</p>
+
+        <div className="space-y-1.5">
+          <Label>表紙画像</Label>
+          <div className="flex items-start gap-4">
+            {coverImageUrl ? (
+              // Supabase等の任意ホストを扱うため、プレビューは素のimgを使用する
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={coverImageUrl}
+                alt="表紙プレビュー"
+                className="h-32 w-24 rounded-md border border-beige-200 object-cover"
+              />
+            ) : (
+              <div className="flex h-32 w-24 items-center justify-center rounded-md border border-dashed border-beige-300 text-beige-300">
+                <ImageIcon size={24} />
+              </div>
+            )}
+            <div className="space-y-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleCoverUpload}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+              >
+                {isUploading ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
+                {coverImageUrl ? "画像を変更" : "画像をアップロード"}
+              </Button>
+              {coverImageUrl && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setValue("coverImageUrl", "", { shouldValidate: true })}
+                  disabled={isUploading}
+                  className="ml-2"
+                >
+                  画像を削除
+                </Button>
+              )}
+              <p className="text-xs text-ink/50">
+                JPG・PNGなど、5MBまで。検索で表紙が見つからない本に、自分で表紙を追加できます。
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="title">本のタイトル</Label>
