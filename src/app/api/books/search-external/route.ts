@@ -217,17 +217,39 @@ function scoreRelevance(query: string, r: ExternalBookResult): number {
   return s;
 }
 
-// タイトル・ISBNで重複を除去
+// タイトルを正規化して版違い(ISBN違い)の重複判定に使う。
+// 副題(コロン以降)と空白を落として比較するので、
+// 「サピエンス全史」と「サピエンス全史 : 文明の構造と人類の幸福」は同一とみなす。
+function normalizeTitleKey(title: string): string {
+  return (title || "")
+    .split(/[:：]/)[0]
+    .replace(/[\s　]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+// より情報量の多い結果を優先する(書影 > ISBN > 概要 > ページ数)
+function richness(r: ExternalBookResult): number {
+  let s = 0;
+  if (r.coverImageUrl) s += 4;
+  if (r.isbn13 || r.isbn10) s += 2;
+  if (r.description) s += 1;
+  if (r.pageCount) s += 1;
+  return s;
+}
+
+// 同一書籍(正規化タイトル一致)の重複を除去し、最も情報量の多い版を1件だけ残す。
+// これにより同じ本の版違いが検索結果に何件も並ぶのを防ぐ。
 function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
-  const seen = new Set<string>();
-  const out: ExternalBookResult[] = [];
+  const byKey = new Map<string, ExternalBookResult>();
   for (const r of results) {
-    const key = (r.isbn13 || r.isbn10 || `${r.title}__${r.author}`).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
+    const key = normalizeTitleKey(r.title) || (r.isbn13 || r.isbn10 || r.title).toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing || richness(r) > richness(existing)) {
+      byKey.set(key, r);
+    }
   }
-  return out;
+  return [...byKey.values()];
 }
 
 export async function GET(request: Request) {
