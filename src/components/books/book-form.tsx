@@ -31,6 +31,7 @@ interface ExternalResult {
   publishedDate?: string;
   description?: string;
   pageCount?: number;
+  source?: string;
 }
 
 // 本の登録・編集で共用するフォーム。編集時は書籍情報(タイトル等)を読み取り専用にする
@@ -138,7 +139,11 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
     if (result.description) setValue("description", result.description);
     if (result.pageCount) setValue("pageCount", result.pageCount);
     setSearchResults([]);
-    showToast("書籍情報を反映しました");
+    if (result.source === "ai") {
+      showToast("AIが推定した情報です。内容を確認してから登録してください", "info");
+    } else {
+      showToast("書籍情報を反映しました");
+    }
   };
 
   const onSubmit = (values: ReadingPostInput) => {
@@ -180,6 +185,11 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
                   >
                     <span className="font-medium">{r.title}</span>
                     <span className="text-ink/50">{r.author}</span>
+                    {r.source === "ai" && (
+                      <span className="ml-auto shrink-0 rounded border border-beige-300 bg-beige-100 px-1.5 py-0.5 text-[10px] text-ink/60">
+                        AI推定
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
