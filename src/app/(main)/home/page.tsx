@@ -7,6 +7,8 @@ import { getCurrentProfile } from "@/lib/data/profile";
 import { getHomeFeed, getMyShelf, getRecommendedBooks } from "@/lib/data/reading-posts";
 import { getMyGoals } from "@/lib/data/goals";
 import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import { MonthlyGoalControl } from "@/components/goals/monthly-goal-control";
 
 export default async function HomePage() {
   const profile = await getCurrentProfile();
@@ -30,12 +32,29 @@ export default async function HomePage() {
     .eq("target_month", new Date().getMonth() + 1)
     .maybeSingle();
 
-  const finishedThisMonth = myShelf.filter((p) => {
-    if (!p.finished_at) return false;
-    const d = new Date(p.finished_at);
+  // 今月の目標の冊数を自分で増減するサーバーアクション。確定後の冊数を返す
+  async function adjustMonthlyGoal(delta: number): Promise<number> {
+    "use server";
+    const sb = createClient();
+    const {
+      data: { user },
+    } = await sb.auth.getUser();
+    if (!user) throw new Error("ログインが必要です");
     const now = new Date();
-    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-  }).length;
+    const { data: g } = await sb
+      .from("reading_goals")
+      .select("id, current_count")
+      .eq("user_id", user.id)
+      .eq("goal_type", "monthly")
+      .eq("target_year", now.getFullYear())
+      .eq("target_month", now.getMonth() + 1)
+      .maybeSingle();
+    if (!g) return 0;
+    const next = Math.max(0, (g.current_count ?? 0) + delta);
+    await sb.from("reading_goals").update({ current_count: next }).eq("id", g.id).eq("user_id", user.id);
+    revalidatePath("/home");
+    return next;
+  }
 
   return (
     <div className="space-y-8">
@@ -62,15 +81,11 @@ export default async function HomePage() {
           </Link>
         </div>
         {goal ? (
-          <div>
-            <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-beige-200">
-              <div
-                className="h-full bg-forest-600"
-                style={{ width: `${Math.min(100, (finishedThisMonth / goal.target_count) * 100)}%` }}
-              />
-            </div>
-            <p className="text-xs text-ink/60">{finishedThisMonth} / {goal.target_count} 冊</p>
-          </div>
+          <MonthlyGoalControl
+            initialCount={goal.current_count ?? 0}
+            target={goal.target_count}
+            adjustAction={adjustMonthlyGoal}
+          />
         ) : (
           <p className="text-sm text-ink/60">
             まだ目標が設定されていません。
