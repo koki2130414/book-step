@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
 // ISBN/タイトル/著者名から書籍情報を取得するプロキシAPI
-// Google Books API(APIキーがあれば優先) → OpenBD(ISBNのみ) の順にフォールバック
-// クライアントにAPIキーを渡さないよう、必ずサーバー側(Route Handler)経由で呼び出す
+// キー不要で使える NDL(国立国会図書館サーチ) を主軸にし、openBD で書影を補完する。
+// Google Books はキーレスだと共有クォータ超過(429)で使えないため、
+// GOOGLE_BOOKS_API_KEY が設定されている場合のみ利用する。
+// クライアントにAPIキーを渡さないよう、必ずサーバー側(Route Handler)経由で呼び出す。
 
 interface ExternalBookResult {
   title: string;
@@ -14,16 +16,18 @@ interface ExternalBookResult {
   publishedDate?: string;
   description?: string;
   pageCount?: number;
-  source: "google_books" | "openbd";
+  source: "google_books" | "openbd" | "ndl";
 }
 
+// ---- Google Books(APIキーがある場合のみ) ----
 async function searchGoogleBooks(q: string): Promise<ExternalBookResult[]> {
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+  if (!apiKey) return []; // キーレスは429になるためスキップ
   const url = new URL("https://www.googleapis.com/books/v1/volumes");
   url.searchParams.set("q", q);
   url.searchParams.set("maxResults", "5");
   url.searchParams.set("country", "JP");
-  if (apiKey) url.searchParams.set("key", apiKey);
+  url.searchParams.set("key", apiKey);
 
   const res = await fetch(url.toString());
   if (!res.ok) return [];
@@ -47,25 +51,170 @@ async function searchGoogleBooks(q: string): Promise<ExternalBookResult[]> {
   });
 }
 
-async function searchOpenBd(isbn: string): Promise<ExternalBookResult[]> {
-  const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(isbn)}`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  const record = json?.[0];
-  if (!record) return [];
+// ---- openBD(ISBN指定の書誌 + 書影) ----
+interface OpenBdInfo {
+  cover?: string;
+  title?: string;
+  author?: string;
+  publisher?: string;
+  pubdate?: string;
+}
 
-  const summary = record.summary ?? {};
-  return [
-    {
-      title: summary.title ?? "",
-      author: summary.author ?? "",
-      isbn13: summary.isbn,
-      coverImageUrl: summary.cover,
-      publisher: summary.publisher,
-      publishedDate: summary.pubdate,
-      source: "openbd",
-    },
-  ];
+// 複数ISBNをまとめて引き、ISBN→書誌情報のMapを返す
+async function fetchOpenBd(isbns: string[]): Promise<Map<string, OpenBdInfo>> {
+  const map = new Map<string, OpenBdInfo>();
+  const unique = [...new Set(isbns.filter(Boolean))];
+  if (unique.length === 0) return map;
+  try {
+    const res = await fetch(`https://api.openbd.jp/v1/get?isbn=${encodeURIComponent(unique.join(","))}`);
+    if (!res.ok) return map;
+    const json = await res.json();
+    for (const rec of json ?? []) {
+      const summary = rec?.summary;
+      if (!summary?.isbn) continue;
+      map.set(summary.isbn, {
+        cover: summary.cover || undefined,
+        title: summary.title || undefined,
+        author: summary.author || undefined,
+        publisher: summary.publisher || undefined,
+        pubdate: summary.pubdate || undefined,
+      });
+    }
+  } catch {
+    // openBDが落ちていても検索自体は継続する
+  }
+  return map;
+}
+
+// ---- NDL(国立国会図書館サーチ) OpenSearch。キー不要でタイトル/著者検索が可能 ----
+function decodeXml(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+function pickTag(block: string, tag: string): string | undefined {
+  const m = block.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i"));
+  return m ? decodeXml(m[1]) : undefined;
+}
+
+// 概要に混じるHTMLタグを除去して読みやすいテキストにする
+function stripHtml(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseNdlItems(xml: string): ExternalBookResult[] {
+  const blocks = xml.split(/<item>/i).slice(1).map((s) => s.split(/<\/item>/i)[0]);
+  const results: ExternalBookResult[] = [];
+
+  for (const block of blocks) {
+    const title = pickTag(block, "dc:title") || pickTag(block, "title");
+    if (!title) continue;
+
+    const creator = pickTag(block, "dc:creator") || pickTag(block, "author") || "";
+    const author = creator
+      .split(/[,、;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i) // 同名の重複を除去
+      .join(", ");
+
+    const publisher = pickTag(block, "dc:publisher");
+    const publishedDate = pickTag(block, "dcterms:issued") || pickTag(block, "dc:date");
+    const descriptionRaw = pickTag(block, "dc:description");
+    const description = descriptionRaw ? stripHtml(descriptionRaw) : undefined;
+
+    // ISBN: <dc:identifier xsi:type="dcndl:ISBN">978...</dc:identifier>
+    const isbnMatch = block.match(/<dc:identifier[^>]*ISBN[^>]*>([\s\S]*?)<\/dc:identifier>/i);
+    const isbnRaw = isbnMatch ? isbnMatch[1].replace(/[^0-9Xx]/g, "").toUpperCase() : "";
+    const isbn13 = isbnRaw.length === 13 ? isbnRaw : undefined;
+    const isbn10 = isbnRaw.length === 10 ? isbnRaw : undefined;
+
+    // ページ数: <dcterms:extent>295p ; 19cm</dcterms:extent>
+    const extent = pickTag(block, "dcterms:extent") || pickTag(block, "dc:extent");
+    const pageMatch = extent?.match(/(\d+)\s*p/);
+    const pageCount = pageMatch ? Number(pageMatch[1]) : undefined;
+
+    results.push({
+      title,
+      author,
+      isbn10,
+      isbn13,
+      publisher,
+      publishedDate,
+      description,
+      pageCount,
+      source: "ndl",
+    });
+  }
+
+  return results;
+}
+
+async function searchNdl(kind: "title" | "creator", keyword: string): Promise<ExternalBookResult[]> {
+  const url = new URL("https://ndlsearch.ndl.go.jp/api/opensearch");
+  url.searchParams.set(kind, keyword);
+  url.searchParams.set("cnt", "8");
+  try {
+    const res = await fetch(url.toString(), { headers: { Accept: "application/xml" } });
+    if (!res.ok) return [];
+    return parseNdlItems(await res.text());
+  } catch {
+    return [];
+  }
+}
+
+async function searchNdlByIsbn(isbn: string): Promise<ExternalBookResult[]> {
+  const url = new URL("https://ndlsearch.ndl.go.jp/api/opensearch");
+  url.searchParams.set("isbn", isbn);
+  url.searchParams.set("cnt", "5");
+  try {
+    const res = await fetch(url.toString(), { headers: { Accept: "application/xml" } });
+    if (!res.ok) return [];
+    return parseNdlItems(await res.text());
+  } catch {
+    return [];
+  }
+}
+
+// 書影が無い結果に openBD の書影(と不足している出版社等)を補完する
+async function enrichCovers(results: ExternalBookResult[]): Promise<ExternalBookResult[]> {
+  const isbns = results.map((r) => r.isbn13 || r.isbn10).filter((v): v is string => !!v);
+  if (isbns.length === 0) return results;
+  const openBd = await fetchOpenBd(isbns);
+  return results.map((r) => {
+    const key = r.isbn13 || r.isbn10;
+    const info = key ? openBd.get(key) : undefined;
+    if (!info) return r;
+    return {
+      ...r,
+      coverImageUrl: r.coverImageUrl || info.cover,
+      publisher: r.publisher || info.publisher,
+      publishedDate: r.publishedDate || info.pubdate,
+    };
+  });
+}
+
+// タイトル・ISBNで重複を除去
+function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
+  const seen = new Set<string>();
+  const out: ExternalBookResult[] = [];
+  for (const r of results) {
+    const key = (r.isbn13 || r.isbn10 || `${r.title}__${r.author}`).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }
 
 export async function GET(request: Request) {
@@ -77,16 +226,51 @@ export async function GET(request: Request) {
   }
 
   try {
-    const isbnLike = /^[0-9]{10}(?:[0-9]{3})?$/.test(query.replace(/-/g, ""));
+    const normalized = query.replace(/[-\s]/g, "");
+    const isbnLike = /^(?:97[89])?\d{9}[\dXx]$/.test(normalized);
 
+    // --- ISBN検索: openBD(書影あり) と NDL/Google を併用 ---
     if (isbnLike) {
-      const isbn = query.replace(/-/g, "");
-      const [openBdResults, googleResults] = await Promise.all([searchOpenBd(isbn), searchGoogleBooks(`isbn:${isbn}`)]);
-      const results = [...openBdResults, ...googleResults].filter((r) => r.title);
+      const [openBdMap, ndlResults, googleResults] = await Promise.all([
+        fetchOpenBd([normalized]),
+        searchNdlByIsbn(normalized),
+        searchGoogleBooks(`isbn:${normalized}`),
+      ]);
+
+      const openBdInfo = openBdMap.get(normalized);
+      const openBdResults: ExternalBookResult[] = openBdInfo?.title
+        ? [
+            {
+              title: openBdInfo.title,
+              author: openBdInfo.author ?? "",
+              isbn13: normalized.length === 13 ? normalized : undefined,
+              isbn10: normalized.length === 10 ? normalized : undefined,
+              coverImageUrl: openBdInfo.cover,
+              publisher: openBdInfo.publisher,
+              publishedDate: openBdInfo.pubdate,
+              source: "openbd",
+            },
+          ]
+        : [];
+
+      const merged = dedupe([...openBdResults, ...googleResults, ...ndlResults]).filter((r) => r.title);
+      const results = await enrichCovers(merged);
       return NextResponse.json({ results });
     }
 
-    const results = await searchGoogleBooks(query);
+    // --- タイトル/著者名などのフリーワード検索 ---
+    // まず Google(キーがある場合のみ) → 無ければ NDL(タイトル) → 0件なら NDL(著者)
+    const googleResults = await searchGoogleBooks(query);
+    let base: ExternalBookResult[] = googleResults;
+
+    if (base.length === 0) {
+      base = await searchNdl("title", query);
+    }
+    if (base.length === 0) {
+      base = await searchNdl("creator", query);
+    }
+
+    const results = await enrichCovers(dedupe(base).filter((r) => r.title));
     return NextResponse.json({ results });
   } catch (error) {
     console.error("search-external error:", error);
