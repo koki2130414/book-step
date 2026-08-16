@@ -261,33 +261,33 @@ function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
 // 一度選んだモデルはウォームインスタンス内でキャッシュする。
 let cachedGeminiModel: string | null = null;
 
-async function pickGeminiModel(apiKey: string, debug?: { info: unknown }): Promise<string | null> {
-  if (cachedGeminiModel) return cachedGeminiModel;
+// ListModelsからgenerateContent対応モデルの一覧を取得し、軽量・新しめを優先して並べる。
+// (一覧に載っていても新規キーでは使えない旧モデルがあるため、実際に呼んで確認する)
+async function listGeminiModels(apiKey: string): Promise<string[]> {
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=200`,
     );
-    if (!res.ok) {
-      if (debug) debug.info = { stage: "listModels", status: res.status, body: (await res.text()).slice(0, 300) };
-      return null;
-    }
+    if (!res.ok) return [];
     const json = await res.json();
     const names: string[] = (json?.models ?? [])
       .filter((m: any) => (m?.supportedGenerationMethods ?? []).includes("generateContent"))
       .map((m: any) => String(m?.name ?? "").replace(/^models\//, ""))
       .filter(Boolean);
-    const pick =
-      names.find((n) => /flash/i.test(n) && !/(vision|thinking|exp|preview|image|audio|tts|live)/i.test(n)) ||
-      names.find((n) => /flash/i.test(n)) ||
-      names.find((n) => /gemini/i.test(n)) ||
-      names[0] ||
-      null;
-    cachedGeminiModel = pick;
-    if (debug && !pick) debug.info = { stage: "listModels", status: 200, note: "no-usable-model", sample: names.slice(0, 10) };
-    return pick;
-  } catch (e) {
-    if (debug) debug.info = { stage: "listModels", err: String(e) };
-    return null;
+    const score = (n: string) => {
+      let s = 0;
+      if (/flash-lite/i.test(n)) s += 6;
+      if (/latest/i.test(n)) s += 5;
+      if (/flash/i.test(n)) s += 3;
+      if (/2\.5/.test(n)) s += 2;
+      if (/2\.0/.test(n)) s += 1;
+      // 旧世代・特殊用途・提供終了になりやすいものは避ける
+      if (/(vision|thinking|exp|image|audio|tts|live|preview|1\.5|1\.0|pro)/i.test(n)) s -= 5;
+      return s;
+    };
+    return names.filter((n) => /flash|gemini/i.test(n)).sort((a, b) => score(b) - score(a));
+  } catch {
+    return [];
   }
 }
 
@@ -334,8 +334,12 @@ async function searchGemini(query: string, debug?: { info: unknown }): Promise<E
     return [];
   }
 
-  const model = await pickGeminiModel(apiKey, debug);
-  if (!model) return [];
+  // キャッシュ済みの動作モデルがあればそれだけを、無ければ候補一覧を実際に試す
+  const candidates = cachedGeminiModel ? [cachedGeminiModel] : (await listGeminiModels(apiKey)).slice(0, 6);
+  if (candidates.length === 0) {
+    if (debug) debug.info = { stage: "listModels", note: "no-candidates" };
+    return [];
+  }
 
   const prompt = [
     "あなたは書籍検索の補助AIです。",
@@ -351,28 +355,34 @@ async function searchGemini(query: string, debug?: { info: unknown }): Promise<E
     generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
   });
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body },
-    );
-    if (!res.ok) {
-      if (debug) debug.info = { model, status: res.status, body: (await res.text()).slice(0, 300) };
-      return [];
+  // 候補モデルを順に試し、最初に成功(200かつ本文あり)したモデルを採用・キャッシュする
+  const tried: Array<{ model: string; status?: number; note?: string }> = [];
+  for (const model of candidates) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body },
+      );
+      if (!res.ok) {
+        tried.push({ model, status: res.status });
+        continue;
+      }
+      const json = await res.json();
+      const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        tried.push({ model, status: 200, note: "no-text" });
+        continue;
+      }
+      cachedGeminiModel = model;
+      const results = parseGeminiBooks(text);
+      if (debug) debug.info = { model, status: 200, count: results.length, tried };
+      return results;
+    } catch (e) {
+      tried.push({ model, note: String(e).slice(0, 80) });
     }
-    const json = await res.json();
-    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      if (debug) debug.info = { model, status: 200, note: "no-text", raw: JSON.stringify(json).slice(0, 300) };
-      return [];
-    }
-    const results = parseGeminiBooks(text);
-    if (debug) debug.info = { model, status: 200, count: results.length };
-    return results;
-  } catch (e) {
-    if (debug) debug.info = { model, err: String(e) };
-    return [];
   }
+  if (debug) debug.info = { note: "all-models-failed", tried };
+  return [];
 }
 
 export async function GET(request: Request) {
