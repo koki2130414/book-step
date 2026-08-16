@@ -134,8 +134,17 @@ export async function updateReadingPost(postId: string, rawInput: ReadingPostInp
 
 export async function deleteReadingPost(postId: string) {
   const supabase = createClient();
-  const { error } = await supabase.from("reading_posts").delete().eq("id", postId);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインが必要です");
+
+  // RLSでも保護されるが、明示的に自分の記録のみ削除対象にする
+  // (いいね・コメント等の関連データはFKのon delete cascadeで自動削除される)
+  const { error } = await supabase.from("reading_posts").delete().eq("id", postId).eq("user_id", user.id);
   if (error) throw new Error(`削除に失敗しました: ${error.message}`);
+
+  revalidatePath("/home");
   revalidatePath("/shelf");
   redirect("/shelf");
 }
