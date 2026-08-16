@@ -34,6 +34,33 @@ interface ExternalResult {
   source?: string;
 }
 
+// 検索でヒットした本の書名・著者名・ISBNから、参考リンクを自動で組み立てる。
+// APIを叩かず必ず開けるURLにするため、専用サイト(Amazon・読書メーター)と
+// 検索ページ(Google要約・YouTube)を使い分ける。
+function buildBookLinks(book: { title?: string; author?: string; isbn10?: string; isbn13?: string }) {
+  const title = (book.title ?? "").trim();
+  const author = (book.author ?? "").trim();
+  const query = [title, author].filter(Boolean).join(" ");
+  const enc = encodeURIComponent;
+  const isbn10 = (book.isbn10 ?? "").replace(/[^0-9Xx]/g, "");
+  const amazonUrl =
+    isbn10.length === 10
+      ? `https://www.amazon.co.jp/dp/${isbn10}`
+      : query
+        ? `https://www.amazon.co.jp/s?k=${enc(query)}`
+        : "";
+  return {
+    // 要約サイト: 「書名 要約」のGoogle検索(flier等の要約サイトがヒットする)
+    summaryUrl: title ? `https://www.google.com/search?q=${enc(query + " 要約")}` : "",
+    // Amazon: ISBN-10があれば商品ページ、無ければ検索
+    amazonUrl,
+    // YouTube: 要約・解説動画の検索
+    youtubeUrl: title ? `https://www.youtube.com/results?search_query=${enc(query + " 要約 解説")}` : "",
+    // その他参考: 読書メーターの感想・レビュー
+    referenceUrl: title ? `https://bookmeter.com/search?keyword=${enc(title)}` : "",
+  };
+}
+
 // 本の登録・編集で共用するフォーム。編集時は書籍情報(タイトル等)を読み取り専用にする
 export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction }: BookFormProps) {
   const { showToast } = useToast();
@@ -138,6 +165,12 @@ export function BookForm({ genres, defaultValues, isEdit = false, onSubmitAction
     if (result.publishedDate) setValue("publishedDate", result.publishedDate);
     if (result.description) setValue("description", result.description);
     if (result.pageCount) setValue("pageCount", result.pageCount);
+    // 選んだ本の要約サイト・Amazon・YouTube・その他参考リンクを自動で挿入する
+    const links = buildBookLinks(result);
+    setValue("summaryUrl", links.summaryUrl);
+    setValue("amazonUrl", links.amazonUrl);
+    setValue("youtubeUrl", links.youtubeUrl);
+    setValue("referenceUrl", links.referenceUrl);
     setSearchResults([]);
     if (result.source === "ai") {
       showToast("AIが推定した情報です。内容を確認してから登録してください", "info");
