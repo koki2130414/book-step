@@ -256,14 +256,40 @@ function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
 // 正規の書誌API(Google/NDL)で見つからなかった本を、AIが推定してタイトル・著者・
 // あらすじだけ補完する。ISBN・出版社・発売日は誤情報(ハルシネーション)を避けるため
 // あえて生成させない。結果は source: "ai" として扱い、UI側で「AI推定」と明示する。
-// モデル名は変わりやすいので複数候補を順に試し、最初に成功したものを使う
-const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.5-flash",
-  "gemini-flash-latest",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-];
+// モデル名はキー/APIバージョンによって異なり固定できないため、ListModelsで
+// generateContent対応モデルを取得し、flash系(軽量・無料枠向き)を優先して選ぶ。
+// 一度選んだモデルはウォームインスタンス内でキャッシュする。
+let cachedGeminiModel: string | null = null;
+
+async function pickGeminiModel(apiKey: string, debug?: { info: unknown }): Promise<string | null> {
+  if (cachedGeminiModel) return cachedGeminiModel;
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=200`,
+    );
+    if (!res.ok) {
+      if (debug) debug.info = { stage: "listModels", status: res.status, body: (await res.text()).slice(0, 300) };
+      return null;
+    }
+    const json = await res.json();
+    const names: string[] = (json?.models ?? [])
+      .filter((m: any) => (m?.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((m: any) => String(m?.name ?? "").replace(/^models\//, ""))
+      .filter(Boolean);
+    const pick =
+      names.find((n) => /flash/i.test(n) && !/(vision|thinking|exp|preview|image|audio|tts|live)/i.test(n)) ||
+      names.find((n) => /flash/i.test(n)) ||
+      names.find((n) => /gemini/i.test(n)) ||
+      names[0] ||
+      null;
+    cachedGeminiModel = pick;
+    if (debug && !pick) debug.info = { stage: "listModels", status: 200, note: "no-usable-model", sample: names.slice(0, 10) };
+    return pick;
+  } catch (e) {
+    if (debug) debug.info = { stage: "listModels", err: String(e) };
+    return null;
+  }
+}
 
 // stripHtml等と衝突しない、Geminiが```json```で囲んで返した場合にフェンスを除去する補助
 function stripJsonFences(s: string): string {
@@ -308,6 +334,9 @@ async function searchGemini(query: string, debug?: { info: unknown }): Promise<E
     return [];
   }
 
+  const model = await pickGeminiModel(apiKey, debug);
+  if (!model) return [];
+
   const prompt = [
     "あなたは書籍検索の補助AIです。",
     `次の検索語に一致する実在の書籍を最大3件、JSON配列だけで返してください。検索語: ${query}`,
@@ -322,31 +351,28 @@ async function searchGemini(query: string, debug?: { info: unknown }): Promise<E
     generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
   });
 
-  for (const model of GEMINI_MODELS) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body },
-      );
-      if (!res.ok) {
-        // 404(モデル名不一致)等は次の候補へ。それ以外(401/429など)も次を試す
-        if (debug) debug.info = { model, status: res.status, body: (await res.text()).slice(0, 300) };
-        continue;
-      }
-      const json = await res.json();
-      const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        if (debug) debug.info = { model, status: 200, note: "no-text", raw: JSON.stringify(json).slice(0, 300) };
-        continue;
-      }
-      const results = parseGeminiBooks(text);
-      if (debug) debug.info = { model, status: 200, count: results.length };
-      return results;
-    } catch (e) {
-      if (debug) debug.info = { model, err: String(e) };
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body },
+    );
+    if (!res.ok) {
+      if (debug) debug.info = { model, status: res.status, body: (await res.text()).slice(0, 300) };
+      return [];
     }
+    const json = await res.json();
+    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      if (debug) debug.info = { model, status: 200, note: "no-text", raw: JSON.stringify(json).slice(0, 300) };
+      return [];
+    }
+    const results = parseGeminiBooks(text);
+    if (debug) debug.info = { model, status: 200, count: results.length };
+    return results;
+  } catch (e) {
+    if (debug) debug.info = { model, err: String(e) };
+    return [];
   }
-  return [];
 }
 
 export async function GET(request: Request) {
