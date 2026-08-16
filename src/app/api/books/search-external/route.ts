@@ -256,9 +256,57 @@ function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
 // 正規の書誌API(Google/NDL)で見つからなかった本を、AIが推定してタイトル・著者・
 // あらすじだけ補完する。ISBN・出版社・発売日は誤情報(ハルシネーション)を避けるため
 // あえて生成させない。結果は source: "ai" として扱い、UI側で「AI推定」と明示する。
-async function searchGemini(query: string): Promise<ExternalBookResult[]> {
+// モデル名は変わりやすいので複数候補を順に試し、最初に成功したものを使う
+const GEMINI_MODELS = [
+  "gemini-2.0-flash",
+  "gemini-2.5-flash",
+  "gemini-flash-latest",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+];
+
+// stripHtml等と衝突しない、Geminiが```json```で囲んで返した場合にフェンスを除去する補助
+function stripJsonFences(s: string): string {
+  return s
+    .replace(/^﻿/, "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+}
+
+function parseGeminiBooks(text: string): ExternalBookResult[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonFences(text));
+  } catch {
+    return [];
+  }
+  // まれに {results:[...]} の形で返る場合も許容する
+  const arr = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as any)?.results)
+      ? (parsed as any).results
+      : Array.isArray((parsed as any)?.books)
+        ? (parsed as any).books
+        : [];
+  return (arr as any[])
+    .filter((x) => !!x && typeof x.title === "string")
+    .slice(0, 3)
+    .map((x) => ({
+      title: String(x.title).trim(),
+      author: typeof x.author === "string" ? x.author.trim() : "",
+      description: typeof x.description === "string" ? x.description.trim() : undefined,
+      source: "ai" as const,
+    }))
+    .filter((r) => r.title);
+}
+
+async function searchGemini(query: string, debug?: { info: unknown }): Promise<ExternalBookResult[]> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) {
+    if (debug) debug.info = { reason: "no-key" };
+    return [];
+  }
 
   const prompt = [
     "あなたは書籍検索の補助AIです。",
@@ -269,44 +317,36 @@ async function searchGemini(query: string): Promise<ExternalBookResult[]> {
     "説明文やコードブロックは付けず、JSONだけを出力してください。",
   ].join("\n");
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
-        }),
-      },
-    );
-    if (!res.ok) return [];
-    const json = await res.json();
-    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return [];
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+  });
 
-    let parsed: unknown;
+  for (const model of GEMINI_MODELS) {
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      return [];
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body },
+      );
+      if (!res.ok) {
+        // 404(モデル名不一致)等は次の候補へ。それ以外(401/429など)も次を試す
+        if (debug) debug.info = { model, status: res.status, body: (await res.text()).slice(0, 300) };
+        continue;
+      }
+      const json = await res.json();
+      const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        if (debug) debug.info = { model, status: 200, note: "no-text", raw: JSON.stringify(json).slice(0, 300) };
+        continue;
+      }
+      const results = parseGeminiBooks(text);
+      if (debug) debug.info = { model, status: 200, count: results.length };
+      return results;
+    } catch (e) {
+      if (debug) debug.info = { model, err: String(e) };
     }
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter((x): x is { title: string; author?: string; description?: string } => !!x && typeof (x as any).title === "string")
-      .slice(0, 3)
-      .map((x) => ({
-        title: x.title.trim(),
-        author: typeof x.author === "string" ? x.author.trim() : "",
-        description: typeof x.description === "string" ? x.description.trim() : undefined,
-        source: "ai" as const,
-      }))
-      .filter((r) => r.title);
-  } catch {
-    return [];
   }
+  return [];
 }
 
 export async function GET(request: Request) {
@@ -369,12 +409,14 @@ export async function GET(request: Request) {
 
     // 正規の書誌APIで1件も見つからなかった場合のみ、AI(Gemini)で補完する。
     // キー未設定なら searchGemini は空配列を返すので、その場合は従来どおり0件。
+    // ?debug=1 を付けるとGemini呼び出しの状態(使用モデル・HTTPステータス等)を返す(動作確認用)。
+    const debug = searchParams.get("debug") === "1" ? { info: null as unknown } : undefined;
     if (ranked.length === 0) {
-      ranked = await searchGemini(query);
+      ranked = await searchGemini(query, debug);
     }
 
     const results = await enrichCovers(ranked);
-    return NextResponse.json({ results });
+    return NextResponse.json(debug ? { results, geminiDebug: debug.info } : { results });
   } catch (error) {
     console.error("search-external error:", error);
     return NextResponse.json({ error: "外部書籍APIの呼び出しに失敗しました" }, { status: 502 });
