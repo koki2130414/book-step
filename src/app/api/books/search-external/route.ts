@@ -204,6 +204,19 @@ async function enrichCovers(results: ExternalBookResult[]): Promise<ExternalBook
   });
 }
 
+// 検索語との一致度でスコアリング(完全一致 > 前方一致 > 部分一致)。実本(ISBNあり)を優先
+function scoreRelevance(query: string, r: ExternalBookResult): number {
+  const t = r.title.toLowerCase();
+  const q = query.toLowerCase().trim();
+  let s = 0;
+  if (t === q) s += 100;
+  else if (t.startsWith(q)) s += 60;
+  else if (t.includes(q)) s += 30;
+  if (r.isbn13 || r.isbn10) s += 10; // 実際に出版された本を優先
+  if (t.includes(q)) s += Math.max(0, 20 - Math.abs(t.length - q.length) / 5); // 余計な語が少ないものを優先
+  return s;
+}
+
 // タイトル・ISBNで重複を除去
 function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
   const seen = new Set<string>();
@@ -270,7 +283,11 @@ export async function GET(request: Request) {
       base = await searchNdl("creator", query);
     }
 
-    const results = await enrichCovers(dedupe(base).filter((r) => r.title));
+    const ranked = dedupe(base)
+      .filter((r) => r.title)
+      .sort((a, b) => scoreRelevance(query, b) - scoreRelevance(query, a))
+      .slice(0, 8);
+    const results = await enrichCovers(ranked);
     return NextResponse.json({ results });
   } catch (error) {
     console.error("search-external error:", error);
