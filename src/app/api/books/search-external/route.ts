@@ -16,7 +16,7 @@ interface ExternalBookResult {
   publishedDate?: string;
   description?: string;
   pageCount?: number;
-  source: "google_books" | "openbd" | "ndl";
+  source: "google_books" | "openbd" | "ndl" | "ai";
 }
 
 // ---- Google Books(APIキーがある場合のみ) ----
@@ -252,6 +252,63 @@ function dedupe(results: ExternalBookResult[]): ExternalBookResult[] {
   return [...byKey.values()];
 }
 
+// ---- Gemini(AI補完。GEMINI_API_KEYがある場合のみ) ----
+// 正規の書誌API(Google/NDL)で見つからなかった本を、AIが推定してタイトル・著者・
+// あらすじだけ補完する。ISBN・出版社・発売日は誤情報(ハルシネーション)を避けるため
+// あえて生成させない。結果は source: "ai" として扱い、UI側で「AI推定」と明示する。
+async function searchGemini(query: string): Promise<ExternalBookResult[]> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return [];
+
+  const prompt = [
+    "あなたは書籍検索の補助AIです。",
+    `次の検索語に一致する実在の書籍を最大3件、JSON配列だけで返してください。検索語: ${query}`,
+    "各要素のキーは title(書名), author(著者名), description(日本語で1〜2文の短いあらすじ) の3つだけにしてください。",
+    "実在が確認できない本は含めないでください。該当が無ければ空配列 [] を返してください。",
+    "ISBN・出版社・発売日・ページ数は不確かなため絶対に含めないでください。",
+    "説明文やコードブロックは付けず、JSONだけを出力してください。",
+  ].join("\n");
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+        }),
+      },
+    );
+    if (!res.ok) return [];
+    const json = await res.json();
+    const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return [];
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((x): x is { title: string; author?: string; description?: string } => !!x && typeof (x as any).title === "string")
+      .slice(0, 3)
+      .map((x) => ({
+        title: x.title.trim(),
+        author: typeof x.author === "string" ? x.author.trim() : "",
+        description: typeof x.description === "string" ? x.description.trim() : undefined,
+        source: "ai" as const,
+      }))
+      .filter((r) => r.title);
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q")?.trim();
@@ -305,10 +362,17 @@ export async function GET(request: Request) {
 
     const base = [...googleResults, ...ndlTitleResults, ...ndlCreatorResults];
 
-    const ranked = dedupe(base)
+    let ranked = dedupe(base)
       .filter((r) => r.title)
       .sort((a, b) => scoreRelevance(query, b) - scoreRelevance(query, a))
       .slice(0, 12);
+
+    // 正規の書誌APIで1件も見つからなかった場合のみ、AI(Gemini)で補完する。
+    // キー未設定なら searchGemini は空配列を返すので、その場合は従来どおり0件。
+    if (ranked.length === 0) {
+      ranked = await searchGemini(query);
+    }
+
     const results = await enrichCovers(ranked);
     return NextResponse.json({ results });
   } catch (error) {
