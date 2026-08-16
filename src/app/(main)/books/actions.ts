@@ -10,6 +10,26 @@ import { readingPostSchema, commentSchema, type ReadingPostInput } from "@/lib/v
 const UNTITLED_PLACEHOLDER = "タイトル未設定";
 const UNKNOWN_AUTHOR_PLACEHOLDER = "著者不明";
 
+// Google Books等の外部APIは published_date を "2018" や "2018-08" のように
+// 部分的な値で返すことがある。books.published_date は DATE 型のため、そのまま渡すと
+// INSERTがエラーになる(500)。YYYY-MM-DD形式へ正規化し、不明な月日は "01" で補う。
+// 解釈できない値は null にして登録自体は成功させる。
+function normalizePublishedDate(raw?: string | null): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  let m: RegExpMatchArray | null;
+  if ((m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/))) {
+    return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  }
+  if ((m = s.match(/^(\d{4})[-/](\d{1,2})$/))) {
+    return `${m[1]}-${m[2].padStart(2, "0")}-01`;
+  }
+  if ((m = s.match(/^(\d{4})$/))) {
+    return `${m[1]}-01-01`;
+  }
+  return null;
+}
+
 // 書籍情報を検索し、既存(ISBN一致)があれば再利用、なければ新規作成する
 async function findOrCreateBook(input: ReadingPostInput, userId: string) {
   const supabase = createClient();
@@ -36,7 +56,7 @@ async function findOrCreateBook(input: ReadingPostInput, userId: string) {
       isbn10,
       cover_image_url: input.coverImageUrl || null,
       publisher: input.publisher || null,
-      published_date: input.publishedDate || null,
+      published_date: normalizePublishedDate(input.publishedDate),
       description: input.description || null,
       page_count: input.pageCount || null,
       genre_id: input.genreId || null,
@@ -126,6 +146,24 @@ export async function updateReadingPost(postId: string, rawInput: ReadingPostInp
     .eq("user_id", user.id); // RLSでも保護されるが明示しておく
 
   if (error) throw new Error(`更新に失敗しました: ${error.message}`);
+
+  // 表紙画像の追加・変更に対応する。書籍の基本情報は編集不可だが、表紙だけは
+  // 後から差し替えられるようにする(自分が登録した書籍のみRLSで更新可能)。
+  if (input.coverImageUrl) {
+    const { data: postRow } = await supabase
+      .from("reading_posts")
+      .select("book_id")
+      .eq("id", postId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (postRow?.book_id) {
+      // 他ユーザーが登録した共有書籍はRLSで更新されない(ベストエフォート)
+      await supabase
+        .from("books")
+        .update({ cover_image_url: input.coverImageUrl })
+        .eq("id", postRow.book_id);
+    }
+  }
 
   revalidatePath(`/books/${postId}`);
   revalidatePath("/shelf");
