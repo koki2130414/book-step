@@ -25,7 +25,7 @@ async function searchGoogleBooks(q: string): Promise<ExternalBookResult[]> {
   if (!apiKey) return []; // キーレスは429になるためスキップ
   const url = new URL("https://www.googleapis.com/books/v1/volumes");
   url.searchParams.set("q", q);
-  url.searchParams.set("maxResults", "5");
+  url.searchParams.set("maxResults", "10");
   url.searchParams.set("country", "JP");
   url.searchParams.set("key", apiKey);
 
@@ -163,7 +163,7 @@ function parseNdlItems(xml: string): ExternalBookResult[] {
 async function searchNdl(kind: "title" | "creator", keyword: string): Promise<ExternalBookResult[]> {
   const url = new URL("https://ndlsearch.ndl.go.jp/api/opensearch");
   url.searchParams.set(kind, keyword);
-  url.searchParams.set("cnt", "8");
+  url.searchParams.set("cnt", "15");
   try {
     const res = await fetch(url.toString(), { headers: { Accept: "application/xml" } });
     if (!res.ok) return [];
@@ -272,21 +272,21 @@ export async function GET(request: Request) {
     }
 
     // --- タイトル/著者名などのフリーワード検索 ---
-    // まず Google(キーがある場合のみ) → 無ければ NDL(タイトル) → 0件なら NDL(著者)
-    const googleResults = await searchGoogleBooks(query);
-    let base: ExternalBookResult[] = googleResults;
+    // Google・NDL(タイトル)・NDL(著者)を同時に検索して結果を統合する。
+    // どれか1つのソースが的外れな結果を返しても、他のソースで見つかった本が
+    // 埋もれないよう、フォールバックではなくマージ方式にしている。
+    const [googleResults, ndlTitleResults, ndlCreatorResults] = await Promise.all([
+      searchGoogleBooks(query),
+      searchNdl("title", query),
+      searchNdl("creator", query),
+    ]);
 
-    if (base.length === 0) {
-      base = await searchNdl("title", query);
-    }
-    if (base.length === 0) {
-      base = await searchNdl("creator", query);
-    }
+    const base = [...googleResults, ...ndlTitleResults, ...ndlCreatorResults];
 
     const ranked = dedupe(base)
       .filter((r) => r.title)
       .sort((a, b) => scoreRelevance(query, b) - scoreRelevance(query, a))
-      .slice(0, 8);
+      .slice(0, 12);
     const results = await enrichCovers(ranked);
     return NextResponse.json({ results });
   } catch (error) {
