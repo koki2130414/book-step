@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Plus } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { getCurrentProfile, getUnreadNotificationCount } from "@/lib/data/profile";
@@ -28,6 +30,18 @@ export default async function MainLayout({ children }: { children: React.ReactNo
         </a>
         <p className="mt-2 text-xs text-ink/30">© BOOK STEP</p>
       </footer>
+
+      {/* どのページからでも本を登録できるフローティングボタン。
+          スマホは下部ナビ中央の「本を追加」があるため、PC表示(md以上)でのみ表示する */}
+      <Link
+        href="/books/new"
+        aria-label="本を登録する"
+        className="fixed bottom-6 right-6 z-40 hidden items-center gap-2 rounded-full bg-forest-600 px-5 py-3 text-sm font-medium text-paper shadow-lg transition-transform hover:scale-105 md:inline-flex"
+      >
+        <Plus size={18} />
+        本を登録
+      </Link>
+
       <BottomNav />
     </div>
   );
