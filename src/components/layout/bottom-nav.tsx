@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Search, PlusCircle, Library, Users, Target, User } from "lucide-react";
+import { Home, Search, PlusCircle, Library, Sparkles, Users, Target, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/search", label: "検索", icon: Search },
   { href: "/books/new", label: "本を追加", icon: PlusCircle, isCentral: true },
   { href: "/shelf", label: "本棚", icon: Library },
+  { href: "/recommend", label: "おすすめ", icon: Sparkles },
   { href: "/friends", label: "友達", icon: Users },
   { href: "/goals", label: "目標", icon: Target },
   { href: "/profile", label: "マイページ", icon: User },
