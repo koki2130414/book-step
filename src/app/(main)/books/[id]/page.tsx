@@ -9,6 +9,7 @@ import { VisibilityBadge } from "@/components/shared/visibility-badge";
 import { ExternalLinks } from "@/components/books/external-links";
 import { LikeButton } from "@/components/books/like-button";
 import { ReportDialog } from "@/components/books/report-dialog";
+import { DeleteBookButton } from "@/components/books/delete-book-button";
 import { CommentSection } from "@/components/books/comment-section";
 import { formatDate } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/data/profile";
@@ -61,11 +62,14 @@ export default async function BookDetailPage({ params }: { params: { id: string 
           {!isOwner && <ReportDialog targetType="reading_post" targetId={post.id} />}
         </div>
         {isOwner && (
-          <Button asChild variant="outline" size="sm">
-            <Link href={`/books/${post.id}/edit`}>
-              <Pencil size={14} /> 編集する
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/books/${post.id}/edit`}>
+                <Pencil size={14} /> 編集する
+              </Link>
+            </Button>
+            <DeleteBookButton postId={post.id} />
+          </div>
         )}
       </div>
 
