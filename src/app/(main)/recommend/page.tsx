@@ -73,7 +73,7 @@ function parseRecs(text: string): Rec[] {
         : [];
   return (arr as Array<Record<string, unknown>>)
     .filter((x) => !!x && typeof x.title === "string")
-    .slice(0, 8)
+    .slice(0, 12)
     .map((x) => ({
       title: String(x.title).trim(),
       author: typeof x.author === "string" ? x.author.trim() : "",
@@ -94,7 +94,7 @@ async function generateRecommendations(
   const list = read.map((b) => `- ${b.title}${b.author ? ` / ${b.author}` : ""}`).join("\n");
   const prompt = [
     "あなたは読書アプリのおすすめAIです。",
-    "あるユーザーがこれまでに登録した本の一覧を渡します。傾向(ジャンル・著者・テーマ)を推測し、まだ一覧に無い実在の書籍を最大8件おすすめしてください。",
+    "あるユーザーがこれまでに登録した本の一覧を渡します。傾向(ジャンル・著者・テーマ)を推測し、まだ一覧に無い実在の書籍を最大10件おすすめしてください。",
     "出力はJSON配列だけ。各要素のキーは title(書名), author(著者名), reason(なぜこの人におすすめか。日本語で1〜2文。既読の本に具体的に触れる) の3つだけにしてください。",
     "実在が確認できない本や、一覧に既にある本は含めないでください。",
     "説明文やコードブロックは付けず、JSONだけを出力してください。",
@@ -124,6 +124,98 @@ async function generateRecommendations(
     }
   }
   return { recs: [], error: "おすすめの取得に失敗しました。時間をおいて再度お試しください。" };
+}
+
+// ---- 実在確認(Google Books・国立国会図書館サーチで裏取りする) ----
+// AIは実在しない本を挙げることがあるため、書誌データベースに載っている本だけに絞る。
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[\s　・:：,，、。.\-—–~〜()（）[\]「」『』!！?？'"’”]/g, "");
+}
+
+// AIのタイトルと実データのタイトルが、サブタイトル差などを許容して一致するか判定する
+function titlesMatch(a: string, b: string): boolean {
+  const na = normTitle(a);
+  const nb = normTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer = na.length <= nb.length ? nb : na;
+  return shorter.length >= 4 && longer.includes(shorter);
+}
+
+async function googleLookup(title: string): Promise<Array<{ title: string; author: string }>> {
+  try {
+    const key = process.env.GOOGLE_BOOKS_API_KEY;
+    const url =
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent("intitle:" + title)}` +
+      `&country=JP&maxResults=5${key ? `&key=${encodeURIComponent(key)}` : ""}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return ((json?.items ?? []) as Array<{ volumeInfo?: { title?: string; authors?: string[] } }>)
+      .map((it) => ({
+        title: it?.volumeInfo?.title ?? "",
+        author: (it?.volumeInfo?.authors ?? []).join(", "),
+      }))
+      .filter((b) => b.title);
+  } catch {
+    return [];
+  }
+}
+
+function decodeXml(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+async function ndlLookup(title: string): Promise<Array<{ title: string; author: string }>> {
+  try {
+    const url = `https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeURIComponent(title)}&cnt=5`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const items: Array<{ title: string; author: string }> = [];
+    const re = /<item>([\s\S]*?)<\/item>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml))) {
+      const block = m[1];
+      const t = block.match(/<title>([\s\S]*?)<\/title>/);
+      const c = block.match(/<dc:creator>([\s\S]*?)<\/dc:creator>/) || block.match(/<author>([\s\S]*?)<\/author>/);
+      const tt = t ? decodeXml(t[1]) : "";
+      if (tt) items.push({ title: tt, author: c ? decodeXml(c[1]) : "" });
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+// Geminiが挙げた本を実在の書誌DBで裏取りし、確認できた本だけを実在のタイトル・著者に置き換えて返す
+async function verifyRecs(recs: Rec[]): Promise<Rec[]> {
+  const checked = await Promise.all(
+    recs.map(async (r) => {
+      const candidates = [...(await googleLookup(r.title)), ...(await ndlLookup(r.title))];
+      const hit = candidates.find((c) => titlesMatch(r.title, c.title));
+      if (!hit) return null;
+      return { title: hit.title, author: hit.author || r.author, reason: r.reason };
+    }),
+  );
+  const seen = new Set<string>();
+  const out: Rec[] = [];
+  for (const r of checked) {
+    if (!r) continue;
+    const key = normTitle(r.title);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }
 
 // ---- おすすめの本をワンタップで「読みたい」本棚へ追加するサーバーアクション ----
@@ -189,8 +281,13 @@ export default async function RecommendPage() {
   let genError: string | null = null;
   if (read.length > 0) {
     const result = await generateRecommendations(read);
-    recs = result.recs;
     genError = result.error;
+    // 実在確認をして、既に本棚にある本も除外する
+    const readNorm = new Set(read.map((b) => normTitle(b.title)));
+    recs = (await verifyRecs(result.recs)).filter((r) => !readNorm.has(normTitle(r.title)));
+    if (!genError && result.recs.length > 0 && recs.length === 0) {
+      genError = "おすすめ候補の実在を確認できませんでした。もう一度お試しください。";
+    }
   }
 
   return (
@@ -220,7 +317,7 @@ export default async function RecommendPage() {
         <>
           <RecommendList items={recs} addAction={addWantToRead} />
           <p className="text-center text-xs text-ink/40">
-            AIが登録済みの本から推定した提案です。内容は必ずしも正確ではありません。
+            AIが提案し、Google Books・国立国会図書館サーチで実在を確認した本です。
           </p>
         </>
       ) : (
