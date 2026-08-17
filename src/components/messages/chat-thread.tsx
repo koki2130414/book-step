@@ -95,26 +95,31 @@ export function ChatThread({ meId, partner, initialMessages, shelfBooks }: ChatT
         </Link>
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto py-4">
+      <div className="flex-1 space-y-3 overflow-y-auto py-4">
         {messages.length === 0 && (
-          <p className="mt-8 text-center text-sm text-ink/40">
+          <p className="mt-8 text-center text-sm text-ink/50">
             メッセージはまだありません。最初の一言を送ってみましょう。
           </p>
         )}
         {messages.map((m) => {
           const mine = m.sender_id === meId;
           return (
-            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-              <div className="flex max-w-[80%] flex-col gap-1">
+            <div key={m.id} className={`flex items-end gap-2 ${mine ? "justify-end" : "justify-start"}`}>
+              {!mine && (
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-forest-100 text-sm font-semibold text-forest-700">
+                  {partner.displayName?.charAt(0) ?? "?"}
+                </div>
+              )}
+              <div className="flex max-w-[78%] flex-col gap-1">
                 <div
-                  className={`rounded-2xl px-3 py-2 text-sm ${
-                    mine ? "bg-forest-600 text-paper" : "bg-beige-100 text-ink"
+                  className={`rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+                    mine ? "bg-forest-600 text-paper" : "border border-beige-200 bg-white text-ink"
                   }`}
                 >
                   {m.book && (
                     <div
-                      className={`mb-1 flex items-center gap-2 rounded-lg p-2 ${
-                        mine ? "bg-forest-700/40" : "bg-paper"
+                      className={`mb-1.5 flex items-center gap-2.5 rounded-lg p-2 ${
+                        mine ? "bg-forest-700" : "border border-beige-200 bg-beige-50"
                       }`}
                     >
                       {m.book.cover_image_url ? (
@@ -122,21 +127,25 @@ export function ChatThread({ meId, partner, initialMessages, shelfBooks }: ChatT
                         <img
                           src={m.book.cover_image_url}
                           alt=""
-                          className="h-14 w-10 shrink-0 rounded object-cover"
+                          className="h-16 w-11 shrink-0 rounded object-cover"
                         />
                       ) : (
                         <div
-                          className={`flex h-14 w-10 shrink-0 items-center justify-center rounded ${
-                            mine ? "bg-forest-700/40 text-paper/70" : "bg-beige-100 text-beige-300"
+                          className={`flex h-16 w-11 shrink-0 items-center justify-center rounded ${
+                            mine ? "bg-forest-600 text-paper/80" : "bg-beige-100 text-beige-300"
                           }`}
                         >
-                          <BookOpen size={16} />
+                          <BookOpen size={18} />
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className={`text-[10px] ${mine ? "text-paper/70" : "text-ink/40"}`}>おすすめの本</p>
-                        <p className="truncate text-xs font-medium">{m.book.title}</p>
-                        <p className={`truncate text-[11px] ${mine ? "text-paper/70" : "text-ink/50"}`}>
+                        <p className={`text-[11px] font-medium ${mine ? "text-paper/80" : "text-forest-700"}`}>
+                          おすすめの本
+                        </p>
+                        <p className={`truncate text-sm font-semibold ${mine ? "text-paper" : "text-ink"}`}>
+                          {m.book.title}
+                        </p>
+                        <p className={`truncate text-xs ${mine ? "text-paper/70" : "text-ink/50"}`}>
                           {m.book.author}
                         </p>
                       </div>
@@ -144,7 +153,7 @@ export function ChatThread({ meId, partner, initialMessages, shelfBooks }: ChatT
                   )}
                   {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
                 </div>
-                <span className={`px-1 text-[10px] text-ink/40 ${mine ? "text-right" : "text-left"}`}>
+                <span className={`px-1 text-[11px] text-ink/50 ${mine ? "text-right" : "text-left"}`}>
                   {timeLabel(m.created_at)}
                 </span>
               </div>
