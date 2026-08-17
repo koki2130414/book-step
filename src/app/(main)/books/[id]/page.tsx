@@ -10,9 +10,11 @@ import { ExternalLinks } from "@/components/books/external-links";
 import { LikeButton } from "@/components/books/like-button";
 import { ReportDialog } from "@/components/books/report-dialog";
 import { DeleteBookButton } from "@/components/books/delete-book-button";
+import { RecommendToFriend } from "@/components/books/recommend-to-friend";
 import { CommentSection } from "@/components/books/comment-section";
 import { formatDate } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/data/profile";
+import { getFriendsList } from "@/lib/data/friends";
 import { getReadingPostById, getComments, getFriendsWhoReadSameBook } from "@/lib/data/reading-posts";
 
 export default async function BookDetailPage({ params }: { params: { id: string } }) {
@@ -22,9 +24,10 @@ export default async function BookDetailPage({ params }: { params: { id: string 
   const post = await getReadingPostById(params.id, profile.id);
   if (!post) notFound();
 
-  const [comments, friendsSameBook] = await Promise.all([
+  const [comments, friendsSameBook, friends] = await Promise.all([
     getComments(post.id),
     getFriendsWhoReadSameBook(post.book_id, post.id),
+    getFriendsList(profile.id),
   ]);
 
   const isOwner = post.user_id === profile.id;
@@ -59,6 +62,13 @@ export default async function BookDetailPage({ params }: { params: { id: string 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <LikeButton postId={post.id} initialLiked={!!post.liked_by_me} initialCount={post.like_count ?? 0} />
+          {book?.id && book?.title && (
+            <RecommendToFriend
+              bookId={book.id}
+              bookTitle={book.title}
+              friends={friends.map((f) => ({ id: f.id, username: f.username, displayName: f.display_name }))}
+            />
+          )}
           {!isOwner && <ReportDialog targetType="reading_post" targetId={post.id} />}
         </div>
         {isOwner && (
