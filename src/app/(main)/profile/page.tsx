@@ -63,6 +63,10 @@ export default async function MyProfilePage() {
         <Link href="/goals"><Target size={16} /> 読書目標を設定する</Link>
       </Button>
 
+      <Button asChild variant="secondary" className="w-full">
+        <Link href="/friends"><Users size={16} /> 友達の表示・非表示を管理</Link>
+      </Button>
+
       {recentlyRead.length > 0 && (
         <section>
           <h2 className="mb-3 font-display font-semibold text-ink">最近読んだ本</h2>
