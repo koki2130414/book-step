@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, BookOpen } from "lucide-react";
+import { Bell, BookOpen, MessageCircle } from "lucide-react";
 
 // PC/モバイル共通のヘッダー。未読通知数はサーバーコンポーネントから渡す
 export function Header({ unreadCount = 0 }: { unreadCount?: number }) {
@@ -27,6 +27,9 @@ export function Header({ unreadCount = 0 }: { unreadCount?: number }) {
           </a>
         </nav>
         <div className="flex items-center gap-3">
+          <Link href="/messages" aria-label="メッセージ" className="rounded-full p-2 hover:bg-beige-50">
+            <MessageCircle size={20} className="text-ink/70" />
+          </Link>
           <Link href="/notifications" aria-label="通知" className="relative rounded-full p-2 hover:bg-beige-50">
             <Bell size={20} className="text-ink/70" />
             {unreadCount > 0 && (
