@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { PlusCircle, Target } from "lucide-react";
+import { PlusCircle, Target, Flame, BarChart3, Feather, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/books/book-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getCurrentProfile } from "@/lib/data/profile";
 import { getHomeFeed, getMyShelf, getRecommendedBooks } from "@/lib/data/reading-posts";
 import { getMyGoals } from "@/lib/data/goals";
+import { getReadingActivity } from "@/lib/data/reading-activity";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { MonthlyGoalControl } from "@/components/goals/monthly-goal-control";
@@ -21,6 +22,14 @@ export default async function HomePage() {
   ]);
   const currentlyReading = myShelf.filter((p) => p.reading_status === "reading");
   const goals = await getMyGoals(profile.id);
+  const activity = await getReadingActivity(profile.id);
+
+  // リマインダー(アプリ内): オンで、設定時刻を過ぎていて、今日まだ読んでいない時だけ声かけ
+  const jstHour = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "numeric", hourCycle: "h23" }).format(new Date()),
+  );
+  const showNudge =
+    (profile.reminder_enabled ?? false) && !activity.readToday && jstHour >= (profile.reminder_hour ?? 20);
 
   const supabase = createClient();
   const { data: goal } = await supabase
@@ -62,6 +71,12 @@ export default async function HomePage() {
         <div>
           <p className="text-sm text-ink/50">おかえりなさい</p>
           <h1 className="font-display text-xl font-bold text-ink">{profile.display_name}さん</h1>
+          {activity.streakDays > 0 && (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-beige-100 px-2.5 py-0.5 text-xs font-medium text-clay-500">
+              <Flame size={12} className="text-clay-600" />
+              {activity.streakDays}日連続で読書中
+            </span>
+          )}
         </div>
         <Button asChild>
           <Link href="/books/new">
@@ -69,6 +84,25 @@ export default async function HomePage() {
           </Link>
         </Button>
       </div>
+
+      {/* リマインダー(アプリ内の声かけ) */}
+      {showNudge && (
+        <Link
+          href="/easy"
+          className="flex items-center justify-between gap-3 rounded-lg border border-forest-100 bg-forest-50/60 p-4 transition-colors hover:bg-forest-50"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-forest-100 text-forest-600">
+              <Feather size={18} />
+            </span>
+            <div>
+              <p className="text-sm font-medium text-ink">今日はまだ読んでいません</p>
+              <p className="text-xs text-ink/60">5分だけ読んでみませんか？</p>
+            </div>
+          </div>
+          <ChevronRight size={18} className="shrink-0 text-forest-600" />
+        </Link>
+      )}
 
       {/* 読書目標の進捗 */}
       <section className="rounded-lg border border-beige-200 bg-beige-50/60 p-4">
@@ -93,6 +127,23 @@ export default async function HomePage() {
           </p>
         )}
       </section>
+
+      {/* 今月の読書レポートへの導線 */}
+      <Link
+        href="/report"
+        className="flex items-center justify-between gap-3 rounded-lg border border-beige-200 p-4 transition-colors hover:bg-beige-50"
+      >
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-forest-100 text-forest-600">
+            <BarChart3 size={18} />
+          </span>
+          <div>
+            <p className="text-sm font-medium text-ink">今月の読書レポート</p>
+            <p className="text-xs text-ink/60">AIが今月の読書をふり返り、来月を提案します</p>
+          </div>
+        </div>
+        <ChevronRight size={18} className="shrink-0 text-ink/40" />
+      </Link>
 
       {/* 個人目標 */}
       {goals.length > 0 && (
