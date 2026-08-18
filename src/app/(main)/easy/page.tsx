@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import {
   Feather,
   Timer,
@@ -11,7 +12,10 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/data/profile";
+import { getReadingActivity } from "@/lib/data/reading-activity";
 import { EasySummary } from "@/components/easy/easy-summary";
+import { ReadingTimer } from "@/components/easy/reading-timer";
+import { ReminderSettings } from "@/components/easy/reminder-settings";
 
 // 認証クッキーを使うため常に動的レンダリング(キャッシュしない)
 export const dynamic = "force-dynamic";
@@ -174,9 +178,49 @@ async function summarizeBook(
   return { ok: false, points: [], error: "要約の取得に失敗しました。時間をおいて再度お試しください。" };
 }
 
+// ---- 集中タイマーの完了を記録し、更新後の実績(今日の回数・分・ストリーク)を返す ----
+async function recordSession(
+  durationMin: number,
+): Promise<{ todaySessions: number; todayMinutes: number; streakDays: number }> {
+  "use server";
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { todaySessions: 0, todayMinutes: 0, streakDays: 0 };
+
+  const safe = Math.min(180, Math.max(1, Math.round(durationMin)));
+  await supabase.from("reading_sessions").insert({ user_id: user.id, duration_min: safe });
+
+  revalidatePath("/easy");
+  revalidatePath("/home");
+  const a = await getReadingActivity(user.id);
+  return { todaySessions: a.todaySessions, todayMinutes: a.todayMinutes, streakDays: a.streakDays };
+}
+
+// ---- 読書リマインダーの設定を保存する ----
+async function saveReminder(enabled: boolean, hour: number): Promise<{ ok: boolean }> {
+  "use server";
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+
+  const safeHour = Math.min(23, Math.max(0, Math.round(hour)));
+  const { error } = await supabase
+    .from("profiles")
+    .update({ reminder_enabled: enabled, reminder_hour: safeHour })
+    .eq("id", user.id);
+  revalidatePath("/home");
+  return { ok: !error };
+}
+
 export default async function EasyReadingPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+
+  const activity = await getReadingActivity(profile.id);
 
   const supabase = createClient();
   const { data: rows } = await supabase
@@ -214,6 +258,23 @@ export default async function EasyReadingPage() {
           本を読むのが苦手でも、集中が続かなくても大丈夫。ハードルを下げるコツと、AIのかんたん要約でゆっくり読書を楽しみましょう。
         </p>
       </div>
+
+      {/* 集中タイマー(ストリーク付き) */}
+      <ReadingTimer
+        initial={{
+          todaySessions: activity.todaySessions,
+          todayMinutes: activity.todayMinutes,
+          streakDays: activity.streakDays,
+        }}
+        recordAction={recordSession}
+      />
+
+      {/* 読書リマインダー */}
+      <ReminderSettings
+        initialEnabled={profile.reminder_enabled ?? false}
+        initialHour={profile.reminder_hour ?? 20}
+        saveAction={saveReminder}
+      />
 
       {/* 読書のコツ集 */}
       <section className="space-y-3">
