@@ -41,16 +41,16 @@ export function BottomNav() {
             );
           }
           return (
-            <li key={href} className="flex flex-1 justify-center">
+            <li key={href} className="flex min-w-0 flex-1 justify-center">
               <Link
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center gap-0.5 px-0.5 py-1 text-[10px]",
+                  "flex min-w-0 flex-col items-center gap-0.5 px-0 py-1 text-[9px] leading-none whitespace-nowrap",
                   active ? "text-forest-700" : "text-ink/50",
                 )}
               >
-                <Icon size={20} />
+                <Icon size={18} />
                 {label}
               </Link>
             </li>
