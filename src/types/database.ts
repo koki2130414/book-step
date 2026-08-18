@@ -28,6 +28,8 @@ export interface Profile {
   favorite_genres: string[];
   role: UserRole;
   status: "active" | "suspended";
+  reminder_enabled?: boolean;
+  reminder_hour?: number;
   created_at: string;
   updated_at: string;
 }
