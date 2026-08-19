@@ -38,7 +38,7 @@ export default function SignUpPage() {
     const supabase = createClient();
     // profiles テーブルへの行作成は DBトリガー(handle_new_user)が自動で行う。
     // ユーザー名・表示名はメタデータとして渡し、トリガー側で参照する
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: values.email,
       password: values.password,
       options: {
@@ -60,19 +60,24 @@ export default function SignUpPage() {
     }
 
     // 自己紹介・興味ジャンルは profiles 作成後に別途更新する(トリガーはusername/display_nameのみ処理するため)
-    if (values.bio || selectedGenres.length > 0) {
-      await supabase.auth.getUser().then(async ({ data }) => {
-        if (data.user) {
-          await supabase
-            .from("profiles")
-            .update({ bio: values.bio ?? null, favorite_genres: selectedGenres })
-            .eq("id", data.user.id);
-        }
-      });
+    if (data.session && (values.bio || selectedGenres.length > 0)) {
+      await supabase
+        .from("profiles")
+        .update({ bio: values.bio ?? null, favorite_genres: selectedGenres })
+        .eq("id", data.session.user.id);
     }
 
-    showToast("登録が完了しました。確認メールをご確認ください。");
-    router.push("/login");
+    // メール確認が不要な設定ならサインアップ時点でセッションが発行される。
+    // その場合は確認メールを待たせず、そのままアプリへ入れる。
+    if (data.session) {
+      showToast("登録が完了しました。");
+      router.push("/home");
+      router.refresh();
+    } else {
+      // メール確認が必要な設定の場合のみ、メール案内を表示する
+      showToast("確認メールを送信しました。メール内のリンクから登録を完了してください。");
+      router.push("/login");
+    }
   };
 
   return (
